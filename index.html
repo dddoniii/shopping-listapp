@@ -162,6 +162,13 @@
       font-size: 0.95rem;
       margin-top: 40px;
     }
+
+    .loading {
+      text-align: center;
+      color: #a0aec0;
+      font-size: 0.95rem;
+      margin-top: 40px;
+    }
   </style>
 </head>
 <body>
@@ -180,24 +187,25 @@
 
     <ul id="list"></ul>
     <p class="empty" id="emptyMsg" style="display:none">아직 아이템이 없어요.</p>
+    <p class="loading" id="loadingMsg">불러오는 중...</p>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    let items = (() => {
-      try { return JSON.parse(localStorage.getItem('shopping') || '[]'); }
-      catch { return []; }
-    })();
+    const SUPABASE_URL = 'https://gceiaymeoivbytkqrxrm.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdjZWlheW1lb2l2Ynl0a3FyeHJtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2ODUwMTEsImV4cCI6MjA5NDI2MTAxMX0.SJV0sAFcMDdWui9TNyeAdoRp6p-DfdaNc-S6E9_oPGI';
 
-    function save() {
-      try { localStorage.setItem('shopping', JSON.stringify(items)); }
-      catch { /* 저장 공간 부족 시 무시 */ }
-    }
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let items = [];
 
     function render() {
       const list = document.getElementById('list');
       const emptyMsg = document.getElementById('emptyMsg');
+      const loadingMsg = document.getElementById('loadingMsg');
       const statsText = document.getElementById('statsText');
 
+      loadingMsg.style.display = 'none';
       list.innerHTML = '';
 
       if (items.length === 0) {
@@ -210,14 +218,14 @@
       const done = items.filter(i => i.done).length;
       statsText.textContent = `${done} / ${items.length} 완료`;
 
-      items.forEach((item, idx) => {
+      items.forEach(item => {
         const li = document.createElement('li');
         if (item.done) li.classList.add('done');
 
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = item.done;
-        cb.addEventListener('change', () => toggle(idx));
+        cb.addEventListener('change', () => toggle(item.id));
 
         const span = document.createElement('span');
         span.className = 'item-text';
@@ -228,40 +236,75 @@
         btn.className = 'delete-btn';
         btn.textContent = '×';
         btn.setAttribute('aria-label', `${item.text} 삭제`);
-        btn.addEventListener('click', () => remove(idx));
+        btn.addEventListener('click', () => remove(item.id));
 
         li.append(cb, span, btn);
         list.appendChild(li);
       });
     }
 
-    function addItem() {
+    async function loadItems() {
+      const { data, error } = await db
+        .from('shopping_items')
+        .select('*')
+        .order('created_at');
+      if (!error) {
+        items = data;
+        render();
+      }
+    }
+
+    async function addItem() {
       const input = document.getElementById('itemInput');
       const text = input.value.trim();
       if (!text) return;
-      items.push({ text, done: false });
-      input.value = '';
-      save();
-      render();
-      input.focus();
+      const { data, error } = await db
+        .from('shopping_items')
+        .insert({ text, done: false })
+        .select()
+        .single();
+      if (!error) {
+        items.push(data);
+        input.value = '';
+        render();
+        input.focus();
+      }
     }
 
-    function toggle(idx) {
-      items[idx].done = !items[idx].done;
-      save();
-      render();
+    async function toggle(id) {
+      const item = items.find(i => i.id === id);
+      const { error } = await db
+        .from('shopping_items')
+        .update({ done: !item.done })
+        .eq('id', id);
+      if (!error) {
+        item.done = !item.done;
+        render();
+      }
     }
 
-    function remove(idx) {
-      items.splice(idx, 1);
-      save();
-      render();
+    async function remove(id) {
+      const { error } = await db
+        .from('shopping_items')
+        .delete()
+        .eq('id', id);
+      if (!error) {
+        items = items.filter(i => i.id !== id);
+        render();
+      }
     }
 
-    function clearDone() {
-      items = items.filter(i => !i.done);
-      save();
-      render();
+    async function clearDone() {
+      const doneIds = items.filter(i => i.done).map(i => i.id);
+      if (doneIds.length === 0) return;
+      const { error } = await db
+        .from('shopping_items')
+        .delete()
+        .in('id', doneIds);
+      if (!error) {
+        items = items.filter(i => !i.done);
+        render();
+      }
     }
 
     document.getElementById('addBtn').addEventListener('click', addItem);
@@ -270,7 +313,7 @@
       if (e.key === 'Enter') addItem();
     });
 
-    render();
+    loadItems();
   </script>
 </body>
 </html>
